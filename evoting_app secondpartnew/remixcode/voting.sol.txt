@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract Voting {
+    struct Candidate {
+        uint256 id;
+        string name;
+        uint256 voteCount;
+    }
+
+    struct District {
+        bool votingStarted;
+        uint256 candidatesCount;
+        mapping(uint256 => Candidate) candidates;
+        mapping(uint256 => bool) hasVotedByCitizen;
+        uint256[] voters; // keep track of citizens who voted
+    }
+
+    address public owner;
+    mapping(string => District) private districts;
+    mapping(address => string) public adminDistrict;
+
+    event CandidateAdded(string district, uint256 id, string name);
+    event Voted(string district, uint256 candidateId, uint256 citizenID);
+    event VotingStarted(string district);
+    event VotingStopped(string district);
+    event CandidatesCleared(string district);
+    event AdminAssigned(address admin, string district);
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only contract owner allowed");
+        _;
+    }
+
+    modifier onlyAdmin(string memory _district) {
+        require(
+            msg.sender == owner || keccak256(bytes(adminDistrict[msg.sender])) == keccak256(bytes(_district)),
+            "Only admin of this district allowed"
+        );
+        _;
+    }
+
+    modifier votingActive(string memory _district) {
+        require(districts[_district].votingStarted, "Voting not started");
+        _;
+    }
+
+    modifier votingNotActive(string memory _district) {
+        require(!districts[_district].votingStarted, "Voting already started");
+        _;
+    }
+
+    constructor(string memory ownerDistrict) {
+        owner = msg.sender;
+        adminDistrict[owner] = ownerDistrict;
+        emit AdminAssigned(owner, ownerDistrict);
+    }
+
+    function assignAdmin(address _admin, string memory _district) public onlyOwner {
+        adminDistrict[_admin] = _district;
+        emit AdminAssigned(_admin, _district);
+    }
+
+    function addCandidate(string memory _district, string memory _name)
+        public onlyAdmin(_district) votingNotActive(_district)
+    {
+        District storage d = districts[_district];
+        d.candidatesCount++;
+        d.candidates[d.candidatesCount] = Candidate(d.candidatesCount, _name, 0);
+        emit CandidateAdded(_district, d.candidatesCount, _name);
+    }
+
+    function startVoting(string memory _district) public onlyAdmin(_district) votingNotActive(_district) {
+        districts[_district].votingStarted = true;
+        emit VotingStarted(_district);
+    }
+
+    function stopVoting(string memory _district) public onlyAdmin(_district) votingActive(_district) {
+        districts[_district].votingStarted = false;
+        emit VotingStopped(_district);
+    }
+
+    // ---------------- CLEAR & RESET ----------------
+    function clearCandidates(string memory _district) public onlyAdmin(_district) votingNotActive(_district) {
+        District storage d = districts[_district];
+
+        // Clear candidates
+        for (uint256 i = 1; i <= d.candidatesCount; i++) {
+            delete d.candidates[i];
+        }
+        d.candidatesCount = 0;
+
+        // Reset voters mapping
+        for (uint256 i = 0; i < d.voters.length; i++) {
+            delete d.hasVotedByCitizen[d.voters[i]];
+        }
+        delete d.voters;
+
+        emit CandidatesCleared(_district);
+    }
+
+    function vote(string memory _district, uint256 _candidateId, uint256 _citizenID) public votingActive(_district) {
+        District storage d = districts[_district];
+        require(!d.hasVotedByCitizen[_citizenID], "Citizen already voted");
+        require(_candidateId > 0 && _candidateId <= d.candidatesCount, "Invalid candidate ID");
+
+        d.candidates[_candidateId].voteCount++;
+        d.hasVotedByCitizen[_citizenID] = true;
+        d.voters.push(_citizenID); // track who voted
+        emit Voted(_district, _candidateId, _citizenID);
+    }
+
+    function getResultsByDistrict(string memory _district)
+        public view
+        returns (uint256[] memory ids, string[] memory names, uint256[] memory votesList)
+    {
+        District storage d = districts[_district];
+        ids = new uint256[](d.candidatesCount);
+        names = new string[](d.candidatesCount);
+        votesList = new uint256[](d.candidatesCount);
+
+        for (uint256 i = 1; i <= d.candidatesCount; i++) {
+            Candidate memory c = d.candidates[i];
+            ids[i - 1] = c.id;
+            names[i - 1] = c.name;
+            votesList[i - 1] = c.voteCount;
+        }
+    }
+
+    function isAdminOfDistrict(address _admin, string memory _district) public view returns (bool) {
+        return _admin == owner || keccak256(bytes(adminDistrict[_admin])) == keccak256(bytes(_district));
+    }
+
+    function votingStartedByDistrict(string memory _district) public view returns (bool) {
+        return districts[_district].votingStarted;
+    }
+
+    // ---------------- NEW FUNCTION ----------------
+    function hasCitizenVoted(string memory _district, uint256 _citizenID) public view returns (bool) {
+        return districts[_district].hasVotedByCitizen[_citizenID];
+    }
+}

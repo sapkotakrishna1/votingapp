@@ -1,0 +1,8 @@
+1. open vs code
+2. open xamm server and start
+3. open cmd where ganache install and run them in cmd
+4. open flutter code and proxy then run cmd with node prox.js
+5. open remix -v 1.3.0 and there is voting.sol compile them
+6. after compile deploy and copy contract and add them in flutter ui
+7. also ganache give private key copy and past on flutter ui
+8. 
