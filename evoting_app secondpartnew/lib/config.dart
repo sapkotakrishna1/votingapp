@@ -1,6 +1,6 @@
 class Config {
   // Base IP / URL
-  static const String baseUrl = "http://192.168.1.91/evoting_api";
+  static const String baseUrl = "http://192.168.1.101/evoting_api";
 
   // Endpoints
   //Register page
@@ -39,4 +39,6 @@ class Config {
   static String get getElectionResults => "$baseUrl/getElectionResults.php";
 
   static String get verifypassword => "$baseUrl/verify_password.php";
+
+  static String get verifyFaceUrl => "$baseUrl/verify_face.php";
 }

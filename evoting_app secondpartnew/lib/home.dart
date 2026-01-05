@@ -2,13 +2,13 @@ import 'dart:convert';
 import 'package:evoting_app/UserProfilePage.dart';
 import 'package:evoting_app/VotingHistoryPageuser.dart';
 import 'package:evoting_app/candidate_detail_page_user.dart';
-import 'package:evoting_app/config.dart';
 import 'package:evoting_app/electionstatus.dart';
 import 'package:evoting_app/login.dart';
+import 'package:google_fonts/google_fonts.dart' hide Config;
+import 'config.dart';
 import 'package:evoting_app/usernewsui.dart';
-import 'package:flutter/foundation.dart';
+//import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'uservotingpage.dart';
 
@@ -326,13 +326,13 @@ class _HomeScreenState extends State<HomeScreen>
                         children: [
                           Text("Welcome",
                               style: GoogleFonts.poppins(
-                                  fontSize: 22, color: Colors.white70)),
+                                  fontSize: 22, color: Colors.white)),
                           Text(
                             widget.username,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.poppins(
-                              fontSize: 22,
+                              fontSize: 20,
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
                             ),

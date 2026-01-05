@@ -1,0 +1,5 @@
+===== SCRIPT START 2026-01-03 18:40:14 =====
+===== SCRIPT START 2026-01-03 18:48:01 =====
+===== SCRIPT START 2026-01-04 09:53:52 =====
+2026-01-04 09:53:57 - Error: Face not detected. Registration cancelled.
+===== SCRIPT START 2026-01-04 11:30:42 =====

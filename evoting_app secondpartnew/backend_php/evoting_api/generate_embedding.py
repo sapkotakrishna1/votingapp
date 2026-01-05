@@ -1,13 +1,33 @@
+# generate_embedding.py
 import sys
+import numpy as np
+from PIL import Image
+import face_recognition
 import json
-import face_recognition # type: ignore
+
+# Check if image path is provided
+if len(sys.argv) < 2:
+    print(json.dumps({"error": "No image path provided"}))
+    sys.exit(1)
 
 image_path = sys.argv[1]
-image = face_recognition.load_image_file(image_path)
-encodings = face_recognition.face_encodings(image)
 
-if len(encodings) > 0:
-    embedding = encodings[0].tolist()
-    print(json.dumps(embedding))
-else:
-    print(json.dumps([]))  # No face detected
+try:
+    # Load image and convert to RGB
+    img = Image.open(image_path).convert("RGB")
+    image = np.ascontiguousarray(np.array(img, dtype=np.uint8))
+
+    # Detect faces
+    face_locations = face_recognition.face_locations(image)
+    if not face_locations:
+        print(json.dumps({"error": "No face detected"}))
+        sys.exit(0)
+
+    # Use the first face only
+    encoding = face_recognition.face_encodings(image, face_locations)[0]
+
+    # Return embedding as JSON
+    print(json.dumps({"embedding": encoding.tolist()}))
+
+except Exception as e:
+    print(json.dumps({"error": str(e)}))

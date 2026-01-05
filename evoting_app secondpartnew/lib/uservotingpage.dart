@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:evoting_app/config.dart';
+import 'package:evoting_app/passwordconfirm.dart';
 import 'package:flutter/material.dart';
 import 'package:web3dart/web3dart.dart';
 import 'package:http/http.dart';
@@ -33,7 +33,7 @@ class _UserVotingPageState extends State<UserVotingPage> {
   final int chainId = 1337;
 
   final Map<String, String> districtContracts = {
-    "parbat": "0x88C65148835e6e639EA585C72A16B8a81179ae29",
+    "parbat": "0x60b14A6d6F42EFe3857BaB5b785D19fe8ab78E5f",
     "pokhara": "0x24c9657C81D29B36Bd194fE3A16Af1F1A1A79987",
     "baglung": "0x24c9657C81D29B36Bd194fE3A16Af1F1A1A79987",
     "lalitpur": "0x24c9657C81D29B36Bd194fE3A16Af1F1A1A79987",
@@ -41,7 +41,7 @@ class _UserVotingPageState extends State<UserVotingPage> {
   };
 
   final String adminPrivateKey =
-      "0xbb294e542b8937e567b0dc507adf72d65fe013be514eb07e608bf016adc2484a";
+      "0x83f65474f255542c7e870fa3d72ae7a8752aa5e44aafecf74bcf54c20618b394";
 
   @override
   void initState() {
@@ -417,138 +417,6 @@ class _UserVotingPageState extends State<UserVotingPage> {
     }
   }
 
-  // ---------------- PASSWORD CONFIRMATION ----------------
-  Future<bool> showPasswordDialog() async {
-    final TextEditingController passwordController = TextEditingController();
-    bool isValid = false;
-    bool obscurePassword = true;
-
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(25),
-              ),
-              elevation: 15,
-              backgroundColor: Colors.white,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                padding: const EdgeInsets.all(25),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      "Confirm Password",
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.deepPurple,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    TextField(
-                      controller: passwordController,
-                      obscureText: obscurePassword,
-                      decoration: InputDecoration(
-                        labelText: "Enter your password",
-                        hintText: "xyz",
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                        prefixIcon:
-                            const Icon(Icons.lock, color: Colors.deepPurple),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            obscurePassword
-                                ? Icons.visibility_off
-                                : Icons.visibility,
-                            color: Colors.deepPurple,
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              obscurePassword = !obscurePassword;
-                            });
-                          },
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 25),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.grey[700],
-                          ),
-                          child: const Text("Cancel"),
-                        ),
-                        const SizedBox(width: 10),
-                        ElevatedButton(
-                          onPressed: () async {
-                            isValid =
-                                await verifyPassword(passwordController.text);
-                            Navigator.pop(context);
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor:
-                                const Color.fromARGB(255, 73, 183, 58),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 12, horizontal: 20),
-                          ),
-                          child: const Text(
-                            "Confirm",
-                            style: TextStyle(fontSize: 16),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    return isValid;
-  }
-
-  Future<bool> verifyPassword(String password) async {
-    final uri = Uri.parse(Config.verifypassword);
-
-    try {
-      final response = await httpClient.post(
-        uri,
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "citizenID": widget.loggedCitizenID.trim(), // remove extra spaces
-          "password": password.trim(), // remove extra spaces
-        }),
-      );
-
-      print("Status code: ${response.statusCode}");
-      print("Response body: ${response.body}");
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data["success"] == true;
-      }
-    } catch (e) {
-      print("Password verification error: $e");
-    }
-
-    return false;
-  }
-
   Future<void> castVote(int candidateId) async {
     if (!votingStarted) {
       setState(() => status = "⚠️ Voting has not started!");
@@ -666,28 +534,35 @@ class _UserVotingPageState extends State<UserVotingPage> {
                       children: candidates.map((c) {
                         return glassCard(
                           child: ListTile(
-                            title: Text(c['name'],
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 18)),
-                            //subtitle: Text("Votes: ${c['voteCount']}",
-                            //    style: const TextStyle(
-                            //        color: Colors.white70, fontSize: 14)),
+                            title: Text(
+                              c['name'],
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                            ),
                             trailing: votingStarted
                                 ? hasVoted
                                     ? const Text(
                                         "✅ Already Voted",
                                         style: TextStyle(
-                                            color: Colors.greenAccent,
-                                            fontWeight: FontWeight.bold),
+                                          color: Colors.greenAccent,
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       )
                                     : ElevatedButton(
                                         onPressed: isVoting
                                             ? null
                                             : () async {
+                                                // 🔐 Ask password using the new page
                                                 bool ok =
-                                                    await showPasswordDialog(); // 🔐 ask password
+                                                    await PasswordConfirmationPage
+                                                        .show(
+                                                            context,
+                                                            widget
+                                                                .loggedCitizenID);
+
                                                 if (!ok) {
                                                   setState(() {
                                                     status =
@@ -695,6 +570,7 @@ class _UserVotingPageState extends State<UserVotingPage> {
                                                   });
                                                   return;
                                                 }
+
                                                 await castVote(c[
                                                     'id']); // 🗳️ blockchain vote
                                               },

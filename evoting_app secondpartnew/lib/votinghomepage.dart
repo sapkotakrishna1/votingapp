@@ -44,9 +44,9 @@ class _VotingHomePageState extends State<VotingHomePage> {
           "0xfcb36bec2706d84f494861724b1becd8957f3f24066dd149bfe9fc079cea08c2"
     },
     "parbat": {
-      "contract": "0x88C65148835e6e639EA585C72A16B8a81179ae29",
+      "contract": "0x60b14A6d6F42EFe3857BaB5b785D19fe8ab78E5f",
       "privateKey":
-          "0xbb294e542b8937e567b0dc507adf72d65fe013be514eb07e608bf016adc2484a"
+          "0x83f65474f255542c7e870fa3d72ae7a8752aa5e44aafecf74bcf54c20618b394"
     },
     "baglung": {
       "contract": "0x24c9657C81D29B36Bd194fE3A16Af1F1A1A79987",

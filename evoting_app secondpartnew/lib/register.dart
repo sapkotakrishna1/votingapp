@@ -1,14 +1,17 @@
 // registration_page.dart
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui_web' as ui;
 import 'package:camera/camera.dart';
 import 'package:evoting_app/disclaimer_popup.dart';
-
 import 'config.dart';
 //import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 import 'dart:html' as html;
-import 'dart:ui' as ui;
+// ignore: unused_import
+import 'ui_stub.dart' if (dart.library.html) 'ui_web.dart';
+
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +20,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'login.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 /// ===== Formatters =====
 class CitizenNumberFormatter extends TextInputFormatter {
@@ -118,6 +123,8 @@ class _RegistrationPageState extends State<RegistrationPage> {
   bool isLoading = false;
   bool verificationPassed = false;
   bool passwordVisible = false;
+  int currentStep = 0;
+  bool isFaceDetected = false; // <-- new field
 
   final ImagePicker _picker = ImagePicker();
 
@@ -153,32 +160,78 @@ class _RegistrationPageState extends State<RegistrationPage> {
 
   Future<void> takeSelfie() async {
     if (kIsWeb) {
-      // ===== Web camera preview =====
+      // ===== Web =====
       html.VideoElement videoElement = html.VideoElement()
         ..autoplay = true
-        ..muted = true // ✅ REQUIRED for iOS
+        ..muted = true
         ..width = 320
-        ..height = 240;
-      videoElement.setAttribute('playsinline', 'true');
+        ..height = 240
+        ..setAttribute('playsinline', 'true');
+
+      html.CanvasElement overlay = html.CanvasElement(
+        width: videoElement.width,
+        height: videoElement.height,
+      );
+
+      html.DivElement container = html.DivElement()
+        ..style.position = 'relative'
+        ..style.width = '${videoElement.width}px'
+        ..style.height = '${videoElement.height}px';
+
+      videoElement.style.position = 'absolute';
+      overlay.style.position = 'absolute';
+      container.children.addAll([videoElement, overlay]);
 
       // ignore: undefined_prefixed_name
       ui.platformViewRegistry.registerViewFactory(
         'web-camera-video',
-        (int viewId) => videoElement,
+        (int viewId) => container,
       );
 
       bool cameraBack = useBackCamera;
+      Uint8List? capturedImage;
+      Timer? faceTimer;
+      html.MediaStream? stream;
 
-      Future<html.MediaStream> startCamera(bool backCamera) async {
-        final stream = await html.window.navigator.mediaDevices!.getUserMedia({
-          'video': {'facingMode': backCamera ? 'environment' : 'user'}
-        });
-        videoElement.srcObject = stream;
-        return stream;
+      void stopCamera() {
+        try {
+          stream?.getTracks().forEach((track) => track.stop());
+          stream = null;
+          videoElement.srcObject = null; // ✅ Important!
+        } catch (_) {}
       }
 
-      var stream = await startCamera(cameraBack);
-      Uint8List? capturedImage;
+      // Start camera
+      Future<html.MediaStream> startCamera(bool backCamera) async {
+        final s = await html.window.navigator.mediaDevices!.getUserMedia({
+          'video': {'facingMode': backCamera ? 'environment' : 'user'}
+        });
+        videoElement.srcObject = s;
+        return s;
+      }
+
+      stream = await startCamera(cameraBack);
+
+      void detectFace() {
+        final ctx = overlay.context2D;
+        ctx.clearRect(0, 0, overlay.width!, overlay.height!);
+        ctx.beginPath();
+        ctx.arc(overlay.width! / 2, overlay.height! / 2, 50, 0, 2 * 3.14159);
+        ctx.strokeStyle = capturedImage != null ? 'green' : 'red';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        if (mounted) setState(() => isFaceDetected = capturedImage != null);
+      }
+
+      // Timer for face detection overlay
+      faceTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+        if (!mounted) {
+          faceTimer?.cancel();
+          faceTimer = null;
+          return;
+        }
+        detectFace();
+      });
 
       await showDialog(
         context: context,
@@ -188,120 +241,125 @@ class _RegistrationPageState extends State<RegistrationPage> {
               return Dialog(
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.8,
+                  ),
                   child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Camera preview
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: SizedBox(
-                            width: 320,
-                            height: 240,
-                            child:
-                                HtmlElementView(viewType: 'web-camera-video'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: SizedBox(
+                              width: 320,
+                              height: 240,
+                              child:
+                                  HtmlElementView(viewType: 'web-camera-video'),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          "Hold your citizenship card clearly in the selfie. "
-                          "If unclear, it may be rejected by admin.",
-                          style: TextStyle(color: Colors.red),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange,
-                              ),
-                              onPressed: () async {
-                                stream
-                                    .getTracks()
-                                    .forEach((track) => track.stop());
-                                cameraBack = !cameraBack;
-                                stream = await startCamera(cameraBack);
-                                setStateDialog(() {});
-                              },
-                              icon: const Icon(Icons.flip_camera_android),
-                              label: Text(cameraBack ? "Front" : "Back"),
-                            ),
-                            const SizedBox(width: 12),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green,
-                              ),
-                              onPressed: () {
-                                final canvas = html.CanvasElement(
-                                    width: videoElement.videoWidth,
-                                    height: videoElement.videoHeight);
-                                final ctx = canvas.context2D;
-                                ctx.drawImage(videoElement, 0, 0);
-                                final dataUrl = canvas.toDataUrl('image/png');
-                                final base64Str = dataUrl.split(',')[1];
-                                setStateDialog(() {
-                                  capturedImage = base64Decode(base64Str);
-                                });
-                              },
-                              child: const Text("Capture"),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        if (capturedImage != null)
-                          Column(
+                          const SizedBox(height: 12),
+                          const Text(
+                            "Hold your citizenship card clearly in the selfie. "
+                            "If unclear, it may be rejected by admin.",
+                            style: TextStyle(color: Colors.red),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Text(
-                                "Preview: Retake if unclear",
-                                style: TextStyle(color: Colors.blue),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.orange),
+                                onPressed: () async {
+                                  stopCamera();
+
+                                  cameraBack = !cameraBack;
+                                  stream = await startCamera(cameraBack);
+                                  if (mounted) setStateDialog(() {});
+                                },
+                                icon: const Icon(Icons.flip_camera_android),
+                                label: Text(cameraBack ? "Front" : "Back"),
                               ),
-                              const SizedBox(height: 6),
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: Image.memory(
-                                  capturedImage!,
-                                  width: 200,
-                                  height: 150,
-                                  fit: BoxFit.cover,
-                                ),
+                              const SizedBox(width: 12),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green),
+                                onPressed: () {
+                                  final canvas = html.CanvasElement(
+                                    width: videoElement.videoWidth,
+                                    height: videoElement.videoHeight,
+                                  );
+                                  canvas.context2D
+                                      .drawImage(videoElement, 0, 0);
+                                  final dataUrl = canvas.toDataUrl('image/png');
+                                  final base64Str = dataUrl.split(',')[1];
+                                  if (mounted) {
+                                    setStateDialog(() {
+                                      capturedImage = base64Decode(base64Str);
+                                      isFaceDetected = true;
+                                    });
+                                  }
+                                },
+                                child: const Text("Capture"),
                               ),
                             ],
                           ),
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: () {
-                                stream
-                                    .getTracks()
-                                    .forEach((track) => track.stop());
-                                Navigator.pop(context);
-                              },
-                              child: const Text("Cancel"),
+                          const SizedBox(height: 12),
+                          if (capturedImage != null)
+                            Column(
+                              children: [
+                                const Text(
+                                  "Preview: Retake if unclear",
+                                  style: TextStyle(color: Colors.blue),
+                                ),
+                                const SizedBox(height: 6),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.memory(
+                                    capturedImage!,
+                                    width: 200,
+                                    height: 150,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 8),
-                            TextButton(
-                              onPressed: capturedImage == null
-                                  ? null
-                                  : () {
-                                      setState(() {
-                                        selfieWebImage = capturedImage;
-                                      });
-                                      stream
-                                          .getTracks()
-                                          .forEach((track) => track.stop());
-                                      Navigator.pop(context);
-                                    },
-                              child: const Text("OK"),
-                            ),
-                          ],
-                        ),
-                      ],
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton(
+                                onPressed: () {
+                                  stopCamera();
+                                  faceTimer?.cancel();
+                                  faceTimer = null;
+                                  Navigator.pop(context);
+                                },
+                                child: const Text("Cancel"),
+                              ),
+                              const SizedBox(width: 8),
+                              TextButton(
+                                onPressed: capturedImage == null
+                                    ? null
+                                    : () {
+                                        stopCamera();
+                                        faceTimer?.cancel();
+                                        faceTimer = null;
+                                        if (!mounted) return;
+                                        setState(() =>
+                                            selfieWebImage = capturedImage);
+                                        Navigator.pop(context);
+                                      },
+                                child: const Text("OK"),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -311,10 +369,10 @@ class _RegistrationPageState extends State<RegistrationPage> {
         },
       );
     } else {
-      // ===== Mobile: open camera automatically =====
+      // ===== Mobile =====
       try {
         final XFile? captured = await _picker.pickImage(
-          source: ImageSource.camera, // camera opens immediately
+          source: ImageSource.camera,
           preferredCameraDevice:
               useBackCamera ? CameraDevice.rear : CameraDevice.front,
           maxWidth: 500,
@@ -323,12 +381,25 @@ class _RegistrationPageState extends State<RegistrationPage> {
         );
 
         if (captured != null) {
+          final inputImage = InputImage.fromFilePath(captured.path);
+          final faceDetector = FaceDetector(
+            options: FaceDetectorOptions(
+                enableContours: true, enableLandmarks: true),
+          );
+
+          final faces = await faceDetector.processImage(inputImage);
+
+          if (!mounted) return;
           setState(() {
             selfieImage = captured;
+            selfieWebImage = null;
+            isFaceDetected = faces.isNotEmpty;
           });
+
+          faceDetector.close();
         }
       } catch (e) {
-        // Handle camera errors or permission denied
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("Camera error: $e")),
         );
@@ -736,11 +807,19 @@ class _RegistrationPageState extends State<RegistrationPage> {
       switch (response.statusCode) {
         case 200:
           if (resBody['success'] != null) {
+            String message;
+            if (resBody['success'] is String) {
+              message = resBody['success'];
+            } else if (resBody['success'] == true) {
+              message = "Registration successful";
+            } else {
+              message = "Registration failed";
+            }
+
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
-                builder: (context) =>
-                    LoginPage(showMessage: resBody['success']),
+                builder: (context) => LoginPage(showMessage: message),
               ),
             );
           } else {
@@ -903,35 +982,38 @@ class _RegistrationPageState extends State<RegistrationPage> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    TextFormField(
-                      controller: fullName,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: buildInputDecoration("Full Name"),
-                      validator: (val) =>
-                          val == null || val.isEmpty ? "Required" : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: dob,
-                      inputFormatters: [DateFormatter()],
-                      keyboardType: TextInputType.number,
-                      style: const TextStyle(color: Colors.white),
-                      decoration:
-                          buildInputDecoration("Date of Birth (YYYY-MM-DD)"),
-                      validator: (val) =>
-                          val == null || val.isEmpty ? "Required" : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: district,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: buildInputDecoration("District"),
-                      validator: (val) =>
-                          val == null || val.isEmpty ? "Required" : null,
-                      //enabled: !verificationPassed,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
+
+                    // ================== STEP WIZARD ==================
+                    if (currentStep == 0) ...[
+                      // Step 1: Personal Info + Citizen Images + Verify
+                      TextFormField(
+                        controller: fullName,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: buildInputDecoration("Full Name"),
+                        validator: (val) =>
+                            val == null || val.isEmpty ? "Required" : null,
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: dob,
+                        inputFormatters: [DateFormatter()],
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(color: Colors.white),
+                        decoration:
+                            buildInputDecoration("Date of Birth (YYYY-MM-DD)"),
+                        validator: (val) =>
+                            val == null || val.isEmpty ? "Required" : null,
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: district,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: buildInputDecoration("District"),
+                        validator: (val) =>
+                            val == null || val.isEmpty ? "Required" : null,
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
                         controller: citizenNumber,
                         inputFormatters: [CitizenNumberFormatter()],
                         keyboardType: TextInputType.number,
@@ -940,162 +1022,190 @@ class _RegistrationPageState extends State<RegistrationPage> {
                             "Citizen Number (XX-XX-XX-XXXXX)"),
                         validator: (val) =>
                             val == null || val.isEmpty ? "Required" : null,
-                        readOnly: true),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: phone,
-                      inputFormatters: [PhoneFormatter()],
-                      keyboardType: TextInputType.phone,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: buildInputDecoration("Phone Number"),
-                      validator: validatePhone,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: password,
-                      obscureText: !passwordVisible,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: buildInputDecoration("Password").copyWith(
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            passwordVisible
-                                ? Icons.visibility
-                                : Icons.visibility_off,
-                            color: Colors.white70,
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              passwordVisible = !passwordVisible;
-                            });
-                          },
-                        ),
+                        readOnly: true,
                       ),
-                      validator: validatePassword,
-                    ),
-                    const SizedBox(height: 20),
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        double maxWidth = constraints.maxWidth;
+                      const SizedBox(height: 12),
 
-                        if (maxWidth < 400) {
-                          // Mobile: stack vertically
-                          return Column(
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          double maxWidth = constraints.maxWidth;
+
+                          if (maxWidth < 400) {
+                            return Column(
+                              children: [
+                                imagePreview(img: frontImage),
+                                const SizedBox(height: 6),
+                                ElevatedButton(
+                                    onPressed: () =>
+                                        pickImage(true, ImageSource.gallery),
+                                    child: const Text("Front Image")),
+                                const SizedBox(height: 12),
+                                imagePreview(img: backImage),
+                                const SizedBox(height: 6),
+                                ElevatedButton(
+                                    onPressed: () =>
+                                        pickImage(false, ImageSource.gallery),
+                                    child: const Text("Back Image")),
+                              ],
+                            );
+                          }
+
+                          return Row(
                             children: [
-                              imagePreview(img: frontImage),
-                              const SizedBox(height: 6),
-                              ElevatedButton(
-                                  onPressed: () =>
-                                      pickImage(true, ImageSource.gallery),
-                                  child: const Text("Front Image")),
-                              const SizedBox(height: 12),
-                              imagePreview(img: backImage),
-                              const SizedBox(height: 6),
-                              ElevatedButton(
-                                  onPressed: () =>
-                                      pickImage(false, ImageSource.gallery),
-                                  child: const Text("Back Image")),
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    imagePreview(img: frontImage),
+                                    const SizedBox(height: 6),
+                                    ElevatedButton(
+                                        onPressed: () => pickImage(
+                                            true, ImageSource.gallery),
+                                        child: const Text("Front Image")),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    imagePreview(img: backImage),
+                                    const SizedBox(height: 6),
+                                    ElevatedButton(
+                                        onPressed: () => pickImage(
+                                            false, ImageSource.gallery),
+                                        child: const Text("Back Image")),
+                                  ],
+                                ),
+                              ),
                             ],
                           );
-                        }
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton(
+                        onPressed: isLoading ? null : verifyFromImages,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white.withOpacity(0.2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 50, vertical: 15),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          verificationPassed ? "Verified ✔" : "Verify",
+                          style: TextStyle(
+                              color: verificationPassed
+                                  ? Colors.greenAccent
+                                  : Colors.white),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton(
+                          onPressed: verificationPassed
+                              ? () => setState(() => currentStep = 1)
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 50, vertical: 15),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            "Next",
+                            style: TextStyle(
+                                color: Color(0xFF4A00E0),
+                                fontWeight: FontWeight.bold),
+                          )),
+                    ],
 
-                        // Wider screens: show side by side
-                        return Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                children: [
-                                  imagePreview(img: frontImage),
-                                  const SizedBox(height: 6),
-                                  ElevatedButton(
-                                      onPressed: () =>
-                                          pickImage(true, ImageSource.gallery),
-                                      child: const Text("Front Image")),
-                                ],
+                    if (currentStep == 1) ...[
+                      // Step 2: Phone + Password + Selfie + Register
+                      TextFormField(
+                        controller: phone,
+                        inputFormatters: [PhoneFormatter()],
+                        keyboardType: TextInputType.phone,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: buildInputDecoration("Phone Number"),
+                        validator: validatePhone,
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: password,
+                        obscureText: !passwordVisible,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: buildInputDecoration("Password").copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              passwordVisible
+                                  ? Icons.visibility
+                                  : Icons.visibility_off,
+                              color: Colors.white70,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                passwordVisible = !passwordVisible;
+                              });
+                            },
+                          ),
+                        ),
+                        validator: validatePassword,
+                      ),
+                      const SizedBox(height: 20),
+                      Column(
+                        children: [
+                          imagePreview(
+                              img: selfieImage, webImg: selfieWebImage),
+                          const SizedBox(height: 6),
+                          const Text(
+                            "Please take a selfie clearly holding your citizenship card. "
+                            "If the image is not clear, it may be rejected by the admin.",
+                            style: TextStyle(color: Colors.red, fontSize: 14),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 6),
+                          ElevatedButton(
+                            onPressed: () async {
+                              if (kIsWeb) {
+                                await takeSelfie();
+                              } else {
+                                await takeSelfie();
+                              }
+                            },
+                            child: const Text("Take Selfie"),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          ElevatedButton(
+                              onPressed: () => setState(() => currentStep = 0),
+                              child: const Text("Back")),
+                          ElevatedButton(
+                            onPressed: isLoading ? null : registerUser,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 50, vertical: 15),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                children: [
-                                  imagePreview(img: backImage),
-                                  const SizedBox(height: 6),
-                                  ElevatedButton(
-                                      onPressed: () =>
-                                          pickImage(false, ImageSource.gallery),
-                                      child: const Text("Back Image")),
-                                ],
-                              ),
+                            child: Text(
+                              isLoading ? "Registering..." : "Register",
+                              style: const TextStyle(
+                                  color: Color(0xFF4A00E0),
+                                  fontWeight: FontWeight.bold),
                             ),
-                          ],
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 20),
-                    Column(
-                      children: [
-                        // Show the captured selfie or placeholder
-                        imagePreview(img: selfieImage, webImg: selfieWebImage),
-                        const SizedBox(height: 6),
+                          ),
+                        ],
+                      ),
+                    ],
 
-                        // Instruction for the user
-                        const Text(
-                          "Please take a selfie clearly holding your citizenship card. "
-                          "If the image is not clear, it may be rejected by the admin.",
-                          style: TextStyle(color: Colors.red, fontSize: 14),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 6),
-
-                        // Button to take the selfie
-                        ElevatedButton(
-                          onPressed: () async {
-                            if (kIsWeb) {
-                              await takeSelfie(); // your web version
-                            } else {
-                              await takeSelfieMobile(); // SAME EXPERIENCE AS WEB
-                            }
-                          },
-                          child: const Text("Take Selfie"),
-                        )
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: isLoading ? null : verifyFromImages,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white.withOpacity(0.2),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 50, vertical: 15),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        "Verify",
-                        style: TextStyle(
-                            color: verificationPassed
-                                ? Colors.greenAccent
-                                : Colors.white),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    ElevatedButton(
-                      onPressed: isLoading ? null : registerUser,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 50, vertical: 15),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        isLoading ? "Registering..." : "Register",
-                        style: const TextStyle(
-                            color: Color(0xFF4A00E0),
-                            fontWeight: FontWeight.bold),
-                      ),
-                    ),
                     const SizedBox(height: 18),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,

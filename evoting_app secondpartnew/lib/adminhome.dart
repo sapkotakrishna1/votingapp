@@ -102,16 +102,32 @@ class _AdminHomeScreenState extends State<AdminHomeScreen>
     }
 
     try {
+      // Remove data:image/...;base64, prefix if present
       final cleaned =
           base64Data.contains(',') ? base64Data.split(',').last : base64Data;
-      final bytes = base64Decode(cleaned);
+
+      // Remove all whitespace/newlines
+      final normalized = cleaned.replaceAll(RegExp(r'\s'), '');
+
+      // Decode
+      final bytes = base64Decode(normalized);
+
+      // If bytes empty, return placeholder
+      if (bytes.isEmpty) throw Exception("Empty image bytes");
+
       return Image.memory(
         bytes,
         height: height ?? 120,
         width: double.infinity,
         fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          height: height ?? 120,
+          color: Colors.grey[300],
+          child: const Center(child: Icon(Icons.broken_image, size: 40)),
+        ),
       );
-    } catch (_) {
+    } catch (e) {
+      print("Error decoding image: $e");
       return Container(
         height: height ?? 120,
         color: Colors.grey[300],
@@ -180,14 +196,18 @@ class _AdminHomeScreenState extends State<AdminHomeScreen>
     try {
       final cleaned =
           base64Data.contains(',') ? base64Data.split(',').last : base64Data;
-      final bytes = base64Decode(cleaned);
+      final normalized = cleaned.replaceAll(RegExp(r'\s'), '');
+      final bytes = base64Decode(normalized);
+
+      if (bytes.isEmpty) throw Exception("Empty image bytes");
 
       return CircleAvatar(
-        radius: 28,
+        radius: size / 2,
         backgroundImage: MemoryImage(bytes),
         backgroundColor: Colors.transparent,
       );
-    } catch (_) {
+    } catch (e) {
+      print("Error decoding avatar: $e");
       return const CircleAvatar(
         radius: 28,
         backgroundColor: Colors.grey,
